@@ -7,40 +7,65 @@
 //
 
 import UIKit
+import SwiftyJSON
+import RealmSwift
 
 @UIApplicationMain
-class AppDelegate: UIResponder, UIApplicationDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate,URLSessionDelegate, URLSessionDataDelegate {
 
     var window: UIWindow?
 
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplicationLaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
+        UIApplication.shared.setMinimumBackgroundFetchInterval(UIApplicationBackgroundFetchIntervalMinimum)
+        UIApplication.shared.registerUserNotificationSettings(.init(types: [.alert,.badge,.sound], categories: nil))
         return true
     }
-
-    func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-        // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
+    
+    func application(_ application: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        checkNewQuake()
+        completionHandler(.failed)
     }
-
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
-        // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
+    
+    func application(_ application: UIApplication, didReceive notification: UILocalNotification) {
+        UIApplication.shared.applicationIconBadgeNumber = 0
     }
-
-    func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
+    
+    func checkNewQuake(){
+        let config = URLSessionConfiguration.default
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let format = DateFormatter()
+        format.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        let endDate = format.string(from: Date.init())
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        let url = "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&endtime=\(endDate)&limit=1&orderby=time".addingPercentEncoding(withAllowedCharacters: NSCharacterSet.urlQueryAllowed)
+        session.dataTask(with: URL(string: url!)!).resume()
     }
-
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+    
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data){
+        let jsonData = JSON(data)
+        let realm = try! Realm()
+        if jsonData != nil{
+            let nowLastId = jsonData["features"][0]["id"].stringValue
+            if realm.objects(Settings)[0].lastQuakeId != nowLastId{
+                sendNotification(nowLastId: nowLastId)
+            }
+        }
     }
-
-    func applicationWillTerminate(_ application: UIApplication) {
-        // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
+    
+    func sendNotification(nowLastId:String){
+        let realm = try! Realm()
+        let localNotification:UILocalNotification = UILocalNotification()
+        localNotification.alertBody = "We have new data about Earthquakes! Check it out!"
+        localNotification.soundName = UILocalNotificationDefaultSoundName
+        localNotification.fireDate = Date.init(timeIntervalSinceNow: 1)
+        localNotification.applicationIconBadgeNumber = UIApplication.shared.applicationIconBadgeNumber+1
+        UIApplication.shared.scheduleLocalNotification(localNotification)
+        try! realm.write {
+            realm.objects(Settings)[0].lastQuakeId = nowLastId
+        }
     }
-
-
+    
 }
 
